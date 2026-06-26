@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import ForeignKey, Integer, Date, JSON
+from sqlalchemy import ForeignKey, Integer, Date, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -9,6 +9,9 @@ from app.core.database import Base
 
 class ScoreSnapshot(Base):
     __tablename__ = "score_snapshots"
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_score_snapshots_user_id_date"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)

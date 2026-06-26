@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Integer, Boolean, JSON
+from sqlalchemy import ForeignKey, String, Integer, Boolean, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -9,6 +9,9 @@ from app.core.database import Base
 
 class AIGenerationLog(Base):
     __tablename__ = "ai_generation_logs"
+    __table_args__ = (
+        Index("ix_ai_generation_logs_user_id_created_at", "user_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)

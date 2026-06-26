@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -10,7 +12,7 @@ class GoalInfo(BaseModel):
 
 
 class SavingSummaryResponse(BaseModel):
-    period: str
+    period: Literal["today", "week", "month"]
     period_start: str
     period_end: str
     completed_action_count: int

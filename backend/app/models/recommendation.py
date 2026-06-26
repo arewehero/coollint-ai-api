@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, String, Integer, Boolean, Text, Numeric, Date
+from sqlalchemy import ForeignKey, String, Integer, Boolean, Text, Numeric, Date, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -10,6 +10,9 @@ from app.core.database import Base
 
 class RecommendationPlan(Base):
     __tablename__ = "recommendation_plans"
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_recommendation_plans_user_id_date"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
@@ -30,6 +33,9 @@ class RecommendationPlan(Base):
 
 class RecommendationAction(Base):
     __tablename__ = "recommendation_actions"
+    __table_args__ = (
+        Index("ix_recommendation_actions_user_id_date", "user_id", "date"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     plan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("recommendation_plans.id"), nullable=False)

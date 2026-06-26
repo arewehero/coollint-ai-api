@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, String, Integer, Boolean, Numeric, Date, JSON
+from sqlalchemy import ForeignKey, String, Integer, Boolean, Numeric, Date, JSON, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -10,6 +10,9 @@ from app.core.database import Base
 
 class WeatherSnapshot(Base):
     __tablename__ = "weather_snapshots"
+    __table_args__ = (
+        Index("ix_weather_snapshots_date_expires_at", "date", "expires_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
