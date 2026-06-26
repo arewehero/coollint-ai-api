@@ -12,8 +12,8 @@ build/
 # Virtual environments
 venv/
 .venv/
+ENV/
 env/
-.env
 
 # IDE
 .vscode/
@@ -29,6 +29,8 @@ desktop.ini
 
 # Testing
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 .hypothesis/
@@ -41,12 +43,22 @@ alembic/versions/__pycache__/
 
 # Database
 *.db
+*.sqlite
 *.sqlite3
 
 # Environment variables
 .env
 .env.*
 !.env.example
+
+# Secrets
+*.pem
+*.key
+*.crt
+*.p12
+*.p8
+secrets/
+secret.*
 
 # Node (if frontend exists)
 node_modules/
@@ -55,6 +67,5 @@ npm-debug.log*
 # Distribution
 *.tar.gz
 *.whl
-
 
 .kiro/
