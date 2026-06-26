@@ -121,7 +121,7 @@ def calculate_period(period: str, reference_date: dt.date) -> Tuple[dt.date, dt.
     if period == "month":
         _, last_day = calendar.monthrange(reference_date.year, reference_date.month)
         return reference_date.replace(day=1), reference_date.replace(day=last_day)
-    raise ApiException(status_code=400, code="INVALID_PROFILE_INPUT", message="period는 today, week, month 중 하나여야 합니다.")
+    raise ApiException(status_code=400, code="INVALID_PERIOD", message="period 파라미터는 today, week, month 중 하나여야 합니다.")
 
 
 def parse_month_period(month: str) -> Tuple[dt.date, dt.date]:

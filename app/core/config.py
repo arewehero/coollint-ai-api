@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     ai_timeout_seconds: int = Field(default=8, ge=1)
     ai_log_payload: bool = False
     ai_prompt_version: str = "v0.3-mock"
+    openweathermap_api_key: str = ""
     internal_job_token: str = ""
 
     model_config = SettingsConfigDict(

@@ -6,10 +6,12 @@ from uuid import UUID
 from fastapi import Depends, Header
 
 from app.core.config import settings
-from app.core.errors import ApiException
+from app.core.errors import ApiException, ErrorCode
+from app.core.security import get_current_user_id  # noqa: F401 — re-export for backward compat
 from app.db.session import get_db
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.recommendation_repository import RecommendationRepository
+from app.repositories.score_repository import ScoreRepository
 from app.services.ai_client import AIClient, get_ai_client
 from app.services.external_adapters import MockScoringAdapter, MockWeatherAdapter
 from app.services.internal_job_service import GenerateDailyRecommendationsJobService
@@ -18,20 +20,21 @@ from app.services.recommendation_service import DailyRecommendationService
 from app.services.saving_summary_service import SavingSummaryService
 
 
-def get_current_user_id(x_user_id: str = Header(..., alias="X-User-Id")) -> UUID:
-    try:
-        return UUID(x_user_id)
-    except ValueError as exc:
-        raise ApiException(status_code=401, code="USER_NOT_FOUND", message="유효하지 않은 사용자 식별자입니다.") from exc
-
-
 def verify_internal_job_token(x_internal_job_token: Optional[str] = Header(None, alias="X-Internal-Job-Token")) -> None:
     if not settings.internal_job_token or x_internal_job_token != settings.internal_job_token:
-        raise ApiException(status_code=401, code="USER_NOT_FOUND", message="내부 Job 토큰이 유효하지 않습니다.")
+        raise ApiException(
+            status_code=ErrorCode.UNAUTHORIZED.http_status,
+            code=ErrorCode.UNAUTHORIZED.code,
+            message="내부 Job 토큰이 유효하지 않습니다.",
+        )
 
 
 def get_profile_repository() -> ProfileRepository:
     return ProfileRepository()
+
+
+def get_score_repository() -> ScoreRepository:
+    return ScoreRepository()
 
 
 def get_recommendation_repository() -> RecommendationRepository:

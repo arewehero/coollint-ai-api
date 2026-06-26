@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any, Dict, Optional, Protocol
 
 from app.core.config import settings
@@ -12,7 +14,23 @@ from app.services.ai_validation import (
     infer_lifestyle_types,
     parse_daily_plan_copy_input,
     parse_lifestyle_analysis_input,
+    validate_lifestyle_analysis_response,
 )
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# AI Client Exceptions
+# ---------------------------------------------------------------------------
+
+
+class AIClientError(Exception):
+    """Raised when the AI service returns an error or produces an invalid response."""
+
+
+class AITimeoutError(AIClientError):
+    """Raised when the AI service does not respond within the configured timeout."""
 
 
 class AIClient(Protocol):
@@ -75,12 +93,212 @@ class FallbackAIClient:
         return build_fallback_daily_plan_copy(input_data)
 
 
+class BedrockAIClient:
+    """AI client that calls AWS Bedrock for lifestyle analysis and recommendation copy."""
+
+    provider = "bedrock"
+    model_name = "anthropic.claude-3-haiku-20240307-v1:0"
+
+    def __init__(
+        self,
+        prompt_version: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
+        model_id: Optional[str] = None,
+        region_name: Optional[str] = None,
+    ) -> None:
+        self.prompt_version = prompt_version or settings.ai_prompt_version
+        self.timeout_seconds = timeout_seconds or settings.ai_timeout_seconds
+        self.model_name = model_id or self.model_name
+        self._region_name = region_name or "ap-northeast-2"
+        self._client: Any = None
+
+    def _get_client(self) -> Any:
+        """Lazily initialise the Bedrock Runtime client with configured timeout."""
+        if self._client is None:
+            try:
+                import boto3
+                from botocore.config import Config as BotoConfig
+            except ImportError as exc:
+                raise AIClientError(
+                    "boto3 is required for BedrockAIClient. Install with: pip install boto3"
+                ) from exc
+
+            boto_config = BotoConfig(
+                read_timeout=self.timeout_seconds,
+                connect_timeout=5,
+                retries={"max_attempts": 0},
+            )
+            self._client = boto3.client(
+                "bedrock-runtime",
+                region_name=self._region_name,
+                config=boto_config,
+            )
+        return self._client
+
+    def analyze_lifestyle(self, input_data: Dict[str, Any]) -> LifestyleAnalysisAIResponse:
+        """Analyze lifestyle via AWS Bedrock. Raises AITimeoutError or AIClientError on failure."""
+        prompt = self._build_lifestyle_prompt(input_data)
+
+        try:
+            raw_response = self._invoke_model(prompt)
+        except AITimeoutError:
+            raise
+        except AIClientError:
+            raise
+        except Exception as exc:
+            raise AIClientError(f"Unexpected error during Bedrock call: {exc}") from exc
+
+        try:
+            return validate_lifestyle_analysis_response(raw_response)
+        except Exception as exc:
+            raise AIClientError(f"AI response validation failed: {exc}") from exc
+
+    def generate_daily_plan_copy(self, input_data: Dict[str, Any]) -> DailyPlanCopyAIResponse:
+        """Generate recommendation copy via AWS Bedrock. Raises AITimeoutError or AIClientError."""
+        prompt = self._build_daily_plan_prompt(input_data)
+
+        try:
+            raw_response = self._invoke_model(prompt)
+        except AITimeoutError:
+            raise
+        except AIClientError:
+            raise
+        except Exception as exc:
+            raise AIClientError(f"Unexpected error during Bedrock call: {exc}") from exc
+
+        try:
+            from app.services.ai_validation import validate_daily_plan_copy_response
+            return validate_daily_plan_copy_response(raw_response, input_data)
+        except Exception as exc:
+            raise AIClientError(f"AI response validation failed: {exc}") from exc
+
+    def _invoke_model(self, prompt: str) -> Dict[str, Any]:
+        """Send prompt to Bedrock and parse the JSON response."""
+        client = self._get_client()
+
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
+        })
+
+        try:
+            response = client.invoke_model(
+                modelId=self.model_name,
+                contentType="application/json",
+                accept="application/json",
+                body=body,
+            )
+        except Exception as exc:
+            error_name = type(exc).__name__
+            # boto3 raises ReadTimeoutError or ClientError with timeout codes
+            if "timeout" in error_name.lower() or "Timeout" in str(exc):
+                raise AITimeoutError(
+                    f"Bedrock request timed out after {self.timeout_seconds}s"
+                ) from exc
+            # Check for botocore-specific timeout exceptions
+            try:
+                from botocore.exceptions import ReadTimeoutError, ConnectTimeoutError
+                if isinstance(exc, (ReadTimeoutError, ConnectTimeoutError)):
+                    raise AITimeoutError(
+                        f"Bedrock request timed out after {self.timeout_seconds}s"
+                    ) from exc
+            except ImportError:
+                pass
+            raise AIClientError(f"Bedrock invocation failed: {exc}") from exc
+
+        try:
+            response_body = json.loads(response["body"].read())
+            # Extract text content from Claude response
+            content_blocks = response_body.get("content", [])
+            text_content = ""
+            for block in content_blocks:
+                if block.get("type") == "text":
+                    text_content += block.get("text", "")
+
+            if not text_content:
+                raise AIClientError("Bedrock response contained no text content")
+
+            return json.loads(text_content)
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise AIClientError(f"Failed to parse Bedrock response: {exc}") from exc
+
+    def _build_lifestyle_prompt(self, input_data: Dict[str, Any]) -> str:
+        """Build a prompt for lifestyle analysis."""
+        valid_types = [
+            "아침형", "낮 활동형", "재택 체류형", "야간 활동형",
+            "불규칙형", "외출 중심형", "냉방 고위험형", "절약 우선형",
+        ]
+
+        return f"""당신은 에너지 절약 전문 AI입니다. 사용자의 생활 데이터를 분석하여 생활유형을 판단해주세요.
+
+## 입력 데이터
+{json.dumps(input_data, ensure_ascii=False, indent=2)}
+
+## 출력 형식
+반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
+
+{{
+  "primary_type": "8개 유형 중 하나",
+  "secondary_type": "8개 유형 중 하나 또는 null",
+  "confidence": 0.0~1.0 사이의 소수,
+  "summary": "200자 이내의 분석 요약",
+  "reason": "판단 근거 설명"
+}}
+
+## 유효한 생활유형 (8개)
+{json.dumps(valid_types, ensure_ascii=False)}
+
+## 규칙
+- primary_type은 반드시 8개 유형 중 하나여야 합니다.
+- secondary_type은 null이거나 8개 유형 중 하나여야 합니다 (primary_type과 다를 것).
+- confidence는 0.0 이상 1.0 이하의 소수입니다.
+- summary는 1자 이상 200자 이하여야 합니다.
+- reason은 1자 이상이어야 합니다.
+- JSON만 출력하세요. 코드 블록이나 설명 텍스트를 추가하지 마세요."""
+
+    def _build_daily_plan_prompt(self, input_data: Dict[str, Any]) -> str:
+        """Build a prompt for daily plan copy generation."""
+        parsed = parse_daily_plan_copy_input(input_data)
+        candidate_ids = [c.candidate_id for c in parsed.candidate_actions]
+
+        return f"""당신은 에너지 절약 전문 AI입니다. 사용자 맞춤형 절약 행동 추천 문구를 생성해주세요.
+
+## 입력 데이터
+{json.dumps(input_data, ensure_ascii=False, indent=2)}
+
+## 출력 형식
+반드시 아래 JSON 형식으로만 응답하세요. 절약 금액은 계산하지 마세요.
+
+{{
+  "cheer_message": "응원 메시지 (1자 이상)",
+  "actions": [
+    {{
+      "candidate_id": "입력의 candidate_id와 동일",
+      "title": "행동 제목 (100자 이내)",
+      "action": "구체적 행동 설명",
+      "reason": "행동의 이유"
+    }}
+  ]
+}}
+
+## 규칙
+- actions 배열에는 입력된 모든 candidate_id에 대한 항목이 있어야 합니다.
+- 필요한 candidate_ids: {json.dumps(candidate_ids, ensure_ascii=False)}
+- 절약 금액, kWh, CO₂ 값을 포함하지 마세요.
+- JSON만 출력하세요."""
+
+
 def get_ai_client(provider: Optional[str] = None) -> AIClient:
     selected_provider = (provider or settings.ai_provider).lower()
     if selected_provider == "mock":
         return MockAIClient()
     if selected_provider == "fallback":
         return FallbackAIClient()
+    if selected_provider == "bedrock":
+        return BedrockAIClient()
 
     return FallbackAIClient()
 

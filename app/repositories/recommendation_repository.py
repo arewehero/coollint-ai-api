@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import ActionCompletionLog, LifestyleAnalysis, RecommendationAction, RecommendationPlan
+from app.models.score import ScoreSnapshot
 
 
 class RecommendationRepository:
@@ -43,6 +44,22 @@ class RecommendationRepository:
         db.add(plan)
         db.flush()
         return plan
+
+    def get_lifestyle_analysis(self, db: Session, user_id: UUID, target_date: dt.date) -> Optional[LifestyleAnalysis]:
+        """Retrieve the most recent LifestyleAnalysis for (user_id, date)."""
+        statement = (
+            select(LifestyleAnalysis)
+            .where(LifestyleAnalysis.user_id == user_id, LifestyleAnalysis.date == target_date)
+        )
+        return db.execute(statement).scalars().first()
+
+    def get_score_snapshot(self, db: Session, user_id: UUID, target_date: dt.date) -> Optional[ScoreSnapshot]:
+        """Retrieve the ScoreSnapshot for (user_id, date)."""
+        statement = (
+            select(ScoreSnapshot)
+            .where(ScoreSnapshot.user_id == user_id, ScoreSnapshot.date == target_date)
+        )
+        return db.execute(statement).scalars().first()
 
     def get_action_for_user(self, db: Session, action_id: UUID, user_id: UUID) -> Optional[RecommendationAction]:
         statement = (
